@@ -1,0 +1,64 @@
+epoll_create
+	epollfd epoll_create(int size)  //现在szie 设置为大于等于0， 没有实际意义了
+	epollfd epoll_create1(flag)  //边缘、水平 创建一个 epollfd flag：EPOLL_CLOEXEC 表示在exec调用的时候关闭fd
+
+epoll_ctl
+	int epoll_ctl(epollfd, int op, int fd, struct epoll_event *event);  //op :EPOLL_CTL_ADD 添加事件, EPOLL_CTL_MOD 更改事件类型, EPOLL_CTL_DEL 删除事件， event， 旧版本（2.6.9之前）不可为null
+
+	typedef union epoll_data 
+	{
+	   void        *ptr; //用户数据
+	   int          fd;  //用户的fd
+	   uint32_t     u32;
+	   uint64_t     u64;
+	} epoll_data_t;
+	 
+	struct epoll_event 
+	{
+	   uint32_t     events;      /* Epoll events */   // EPOLLIN(可读), EPOLLOUT,EPOLLRDHUP, EPOLLPRI, EPOLLERR, EPOLLHUP, EPOLLET, EPOLLONESHOT
+	   epoll_data_t data;        /* User data variable */
+	};
+
+	EPOLLRDHUP:流式套接字，对端关闭了连接，或者半关闭了写操作。该标志，在边沿触发模式下检测对端关闭时，是很有用的
+	EPOLLPRI，读操作上有紧急数据
+	EPOLLERR，文件描述符上发生了错误。epoll_wait始终监听该事件，无需再events上设置；
+	EPOLLHUP，文件描述符上发生了Hang up。epoll_wait始终监听该事件，无需再events上设置；
+	EPOLLET，置文件描述符为边沿触发模式，epoll上默认的行为模式是水平触发模式；
+
+	EPOLLONESHOT (since Linux 2.6.2)，置文件描述符为一次性的(one-shot)。
+		这意味着，当该文件上通过epoll_wait触发了一个事件之后，该文件描述符就被内部disable了，在epoll实例上不再报告该文件描述符上的事件了。
+		用户必须用EPOLL_CTL_MOD调用epoll_ctl，以新的事件掩码再次注册该描述符。
+	
+epoll_wait
+	int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout); 
+	int epoll_pwait(int epfd, struct epoll_event *events, int maxevents, int timeout, const sigset_t *sigmask);  //等待epollfd上的事件发生
+
+	epoll_wait 返回时，该结构中的data成员，与调用epoll_ctl（EPOLL_CTL_ADD, EPOLL_CTL_MOD）时的data一样。events成员包含触发的事件掩码。
+	epoll_event *events 返回后指向已经被触发的事件。
+	maxevents 本次最多处理时间。
+	epoll_wait成功时返回准备好的文件描述符数，如果超时时间到了，还没有准备好的文件描述符，则返回0.出错时返回-1.
+
+	epoll_wait调用被信号中断；
+	如果timeout为-1，意味着如果没有事件就绪epoll_wait会一直阻塞；
+
+	 epoll_wait和epoll_pwait
+	 		epoll_pwait可以使应用程序安全的等待信号的发生。
+	 		如果将sigmask置为NULL，则epoll_pwait等价于epoll_wait。
+	 		
+	注意，如果某个线程阻塞于epoll_wait时，另一个线程向相同的epoll实例上添加了新的文件描述符，而且该描述符上的事件触发，则会导致原来阻塞于epoll_wait上的线程停止阻塞。
+
+	如果select上监听的描述符，在其他线程上被关闭了，则这种行为是未定义的。某些UNIX系统上，select会停止阻塞直接返回，并且将该描述符视为准备好的（接下来的IO操作会发生错误）。在Linux（以及其他系统）上，在其他线程上关闭该描述符对select无影响，epoll上的处理方式也一样。
+
+ 		
+ 
+
+
+
+
+
+
+
+
+
+
+ 

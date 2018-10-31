@@ -1,0 +1,249 @@
+信号本质
+
+软中断信号（signal，又简称为信号）用来通知进程发生了异步事件。
+在软件层次上是对中断机制的一种模拟，在原理上，一个进程收到一个信号与处理器收到一个中断请求可以说是一样的。
+信号是进程间通信机制中唯一的异步通信机制，一个进程不必通过任何操作来等待信号的到达，事实上，进程也不知道信号到底什么时候到达。
+进程之间可以互相通过系统调用kill发送软中断信号。内核也可以因为内部事件而给进程发送信号，通知进程发生了某个事件。
+信号机制除了基本通知功能外，还可以传递附加信息。
+
+软中断信号， 对中断的模拟， 进程间唯一的异步通信机制，无需等待到达。用于通知事件，也可携带信息。  进程--kill->进程。   内核--signal-->进程。
+
+分类： 
+	可靠信号与不可靠信号    
+		if signal value > SIGRTMIN 可靠 else 不可靠。
+		不可靠： 信号可能丢失
+		可靠： 支持队列，信号不会丢失。
+		同时，由signal()安装的实时信号支持排队，同样不会丢失。
+		
+	实时信号与非实时信号
+		早期Unix系统只定义了32种信号，前32种信号已经有了预定义值，每个信号有了确定的用途及含义，并且每种信号都有各自的缺省动作。
+		非实时信号都不支持排队，都是不可靠信号；实时信号都支持排队，都是可靠信号。
+		
+信号处理流程
+	对于一个完整的信号生命周期(从信号发送到相应的处理函数执行完毕)来说，可以分为三个阶段：
+	信号诞生 ->信号在进程中注册 ->信号的执行和注销		
+	
+这里按发出信号的原因简单分类，以了解各种信号：
+（1） 与进程终止相关的信号。当进程退出，或者子进程终止时，发出这类信号。
+（2） 与进程例外事件相关的信号。如进程越界，或企图写一个只读的内存区域（如程序正文区），或执行一个特权指令及其他各种硬件错误。
+（3） 与在系统调用期间遇到不可恢复条件相关的信号。如执行系统调用exec时，原有资源已经释放，而目前系统资源又已经耗尽。
+（4） 与执行系统调用时遇到非预测错误条件相关的信号。如执行一个并不存在的系统调用。
+（5） 在用户态下的进程发出的信号。如进程调用系统调用kill向其他进程发送信号。
+（6） 与终端交互相关的信号。如用户关闭一个终端，或按下break键等情况。
+（7） 跟踪进程执行的信号。
+
+Linux支持的信号列表如下。很多信号是与机器的体系结构相关的
+
+信号值 默认处理动作 发出信号的原因
+
+	SIGHUP 1 A 终端挂起或者控制进程终止
+	SIGINT 2 A 键盘中断（如break键被按下）
+	SIGQUIT 3 C 键盘的退出键被按下
+	SIGILL 4 C 非法指令
+	SIGABRT 6 C 由abort(3)发出的退出指令
+	SIGFPE 8 C 浮点异常
+	SIGKILL 9 AEF Kill信号
+	SIGSEGV 11 C 无效的内存引用
+	SIGPIPE 13 A 管道破裂: 写一个没有读端口的管道
+	SIGALRM 14 A 由alarm(2)发出的信号
+	SIGTERM 15 A 终止信号
+	SIGUSR1 30,10,16 A 用户自定义信号1
+	SIGUSR2 31,12,17 A 用户自定义信号2
+	SIGCHLD 20,17,18 B 子进程结束信号
+	SIGCONT 19,18,25 进程继续（曾被停止的进程）
+	SIGSTOP 17,19,23 DEF 终止进程
+	SIGTSTP 18,20,24 D 控制终端（tty）上按下停止键
+	SIGTTIN 21,21,26 D 后台进程企图从控制终端读
+	SIGTTOU 22,22,27 D 后台进程企图从控制终端写
+
+	处理动作一项中的字母含义如下
+	A 缺省的动作是终止进程
+	B 缺省的动作是忽略此信号，将该信号丢弃，不做处理
+	C 缺省的动作是终止进程并进行内核映像转储（dump core），并且进程退出执行，这方便程序员，得到进程执行时的数据值，并且可以调试他们的程序。
+	D 缺省的动作是停止进程，进入停止状况以后还能重新进行下去，一般是在调试的过程中（例如ptrace系统调用）
+	E 信号不能被捕获
+	F 信号不能被忽略
+
+信号在目标进程中注册
+
+	进程的task_struct结构中有关于本进程中未决信号的数据成员： struct sigpending pending：
+
+	struct sigpending{
+	        struct sigqueue *head, *tail;
+	        sigset_t signal;
+	};
+
+	struct sigqueue{
+	        struct sigqueue *next;
+	        siginfo_t info;
+	}
+
+	内核处理一个进程收到的软中断信号是在该进程的上下文中，因此，进程必须处于运行状态。
+
+信号的安装
+	linux主要有两个函数实现信号的安装：signal()、sigaction()。其中signal()只有两个参数，不支持信号传递信息，主要是用于前32种非实时信号的安装；而sigaction()是较新的函数（由两个系统调用实现：sys_signal以及sys_rt_sigaction），有三个参数，支持信号传递信息，主要用来与 sigqueue() 系统调用配合使用，当然，sigaction()同样支持非实时信号的安装。sigaction()优于signal()主要体现在支持信号带有参数。
+	
+	signal()
+		#include <signal.h>
+		void (*signal(int signum, void (*handler))(int)))(int);
+		如果该函数原型不容易理解的话，可以参考下面的分解方式来理解：
+		typedef void (*sighandler_t)(int)；
+		sighandler_t signal(int signum, sighandler_t handler));
+		第一个参数指定信号的值，第二个参数指定针对前面信号值的处理，可以忽略该信号（参数设为SIG_IGN）；可以采用系统默认方式处理信号(参数设为SIG_DFL)；也可以自己实现处理方式(参数指定一个函数地址)。
+		如果signal()调用成功，返回最后一次为安装信号signum而调用signal()时的handler值；失败则返回SIG_ERR。
+		传递给信号处理例程的整数参数是信号值，这样可以使得一个信号处理例程处理多个信号。
+		
+		void sigroutine(int dunno)
+
+		{ /* 信号处理例程，其中dunno将会得到信号的值 */
+
+		        switch (dunno) {
+		        case 1:.....
+		        case 3:
+		        printf("Get a signal -- SIGQUIT ");
+		        break;
+		        }
+		        return;
+
+		}
+
+		int main() {
+		        printf("process id is %d ",getpid());
+		        signal(SIGHUP, sigroutine); //* 下面设置三个信号的处理方法
+		        signal(SIGINT, sigroutine);
+		        for (;;) ;
+		}
+
+	sigaction()
+		#include <signal.h>
+
+		int sigaction(int signum,const struct sigaction *act,struct sigaction *oldact));
+
+			sigaction函数用于改变进程接收到特定信号后的行为。
+			第一个参数为信号的值，可以为除SIGKILL及SIGSTOP外的任何一个特定有效的信号（为这两个信号定义自己的处理函数，将导致信号安装错误）。
+			第二个参数是指向结构sigaction的一个实例的指针，在结构sigaction的实例中，指定了对特定信号的处理，可以为空，进程会以缺省方式对信号处理；
+			第三个参数oldact指向的对象用来保存返回的原来对相应信号的处理，可指定oldact为NULL。如果把第二、第三个参数都设为NULL，那么该函数可用于检查信号的有效性。
+
+			第二个参数最为重要，其中包含了对指定信号的处理、信号所传递的信息、信号处理函数执行过程中应屏蔽掉哪些信号等等。
+			sigaction结构定义如下：
+			struct sigaction {
+
+			       union{
+			               __sighandler_t _sa_handler;
+			               void (*_sa_sigaction)(int,struct siginfo *, void *)；
+			       }_u
+			    sigset_t sa_mask；
+			    unsigned long sa_flags；
+			}
+
+			1、联合数据结构中的两个元素_sa_handler以及*_sa_sigaction指定信号关联函数，即用户指定的信号处理函数。除了可以是用户自定义的处理函数外，还可以为SIG_DFL(采用缺省的处理方式)，也可以为SIG_IGN（忽略信号）。
+			2、由_sa_sigaction是指定的信号处理函数带有三个参数，是为实时信号而设的（当然同样支持非实时信号），它指定一个3参数信号处理函数。第一个参数为信号值，第三个参数没有使用，第二个参数是指向siginfo_t结构的指针，结构中包含信号携带的数据值，参数所指向的结构如下：
+
+			siginfo_t {
+			      int      si_signo;  /* 信号值，对所有信号有意义*/
+			      int      si_errno;  /* errno值，对所有信号有意义*/
+			      int      si_code;   /* 信号产生的原因，对所有信号有意义*/
+			     union{        /* 联合数据结构，不同成员适应不同信号 */
+
+			             //确保分配足够大的存储空间
+			             int _pad[SI_PAD_SIZE];
+			             //对SIGKILL有意义的结构
+			             struct{
+			                            ...
+			                       }...
+			                     ... ...                               
+			             //对SIGILL, SIGFPE, SIGSEGV, SIGBUS有意义的结构
+
+			        struct{
+			                            ...
+			                       }...
+			                     ... ...
+			               }
+			}
+
+
+信号的发送
+		发送信号的主要函数有：kill()、raise()、 sigqueue()、alarm()、setitimer()以及abort()。
+
+	int kill(pid_t pid,int signo)
+		该系统调用可以用来向任何进程或进程组发送任何信号。参数pid的值为信号的接收进程
+
+	int sigqueue(pid_t pid, int sig, const union sigval val)
+		调用成功返回 0；否则，返回 -1。
+		sigqueue()是比较新的发送信号系统调用，主要是针对实时信号提出的（当然也支持前32种），支持信号带有参数，与函数sigaction()配合使用。
+		sigqueue的第一个参数是指定接收信号的进程ID，第二个参数确定即将发送的信号，第三个参数是一个联合数据结构union sigval，指定了信号传递的参数，即通常所说的4字节值。
+
+	unsigned int alarm(unsigned int seconds)
+		系统调用alarm安排内核为调用进程在指定的seconds秒后发出一个SIGALRM的信号。
+		如果指定的参数seconds为0，则不再发送 SIGALRM信号。后一次设定将取消前一次的设定。该调用返回值为上次定时调用到发送之间剩余的时间，或者因为没有前一次定时调用而返回0。
+		注意，在使用时，alarm只设定为发送一次信号，如果要多次发送，就要多次使用alarm调用。
+
+	setitimer（）
+		现在的系统中很多程序不再使用alarm调用，而是使用setitimer调用来设置定时器，用getitimer来得到定时器的状态，这两个调用的声明格式如下：
+		int getitimer(int which, struct itimerval *value);
+		int setitimer(int which, const struct itimerval *value, struct itimerval *ovalue);
+		在使用这两个调用的进程中加入以下头文件：
+		#include <sys/time.h>
+		该系统调用给进程提供了三个定时器，它们各自有其独有的计时域，当其中任何一个到达，就发送一个相应的信号给进程，并使得计时器重新开始。三个计时器由参数which指定，如下所示：
+		TIMER_REAL：按实际时间计时，计时到达将给进程发送SIGALRM信号。
+		ITIMER_VIRTUAL：仅当进程执行时才进行计时。计时到达将发送SIGVTALRM信号给进程。
+		ITIMER_PROF：当进程执行时和系统为该进程执行动作时都计时。与ITIMER_VIR-TUAL是一对，该定时器经常用来统计进程在用户态和内核态花费的时间。计时到达将发送SIGPROF信号给进程。
+
+		定时器中的参数value用来指明定时器的时间，其结构如下：
+		struct itimerval {
+		        struct timeval it_interval; /* 下一次的取值 */
+		        struct timeval it_value; /* 本次的设定值 */
+		};
+
+abort()
+	#include <stdlib.h>
+	void abort(void);
+	向进程发送SIGABORT信号，默认情况下进程会异常退出，当然可定义自己的信号处理函数。即使SIGABORT被进程设置为阻塞信号，调用abort()后，SIGABORT仍然能被进程接收。该函数无返回值。
+
+	raise（）
+	#include <signal.h>
+	int raise(int signo)
+	向进程本身发送信号，参数为即将发送的信号值。调用成功返回 0；否则，返回 -1。
+
+信号集及信号集操作函数：
+	信号集被定义为一种数据类型：
+		typedef struct {
+				unsigned long sig[_NSIG_WORDS]；
+		} sigset_t
+		
+	信号集用来描述信号的集合，每个信号占用一位。Linux所支持的所有信号可以全部或部分的出现在信号集中，主要与信号阻塞相关函数配合使用。
+	
+	下面是为信号集操作定义的相关函数：
+		#include <signal.h>
+
+		int sigemptyset(sigset_t *set)；//初始化由set指定的信号集，信号集里面的所有信号被清空；
+		int sigfillset(sigset_t *set)； //调用该函数后，set指向的信号集中将包含linux支持的64种信号；
+		int sigaddset(sigset_t *set, int signum) //在set指向的信号集中加入signum信号；
+		int sigdelset(sigset_t *set, int signum)；//在set指向的信号集中删除signum信号；
+		int sigismember(const sigset_t *set, int signum)；//判定信号signum是否在set指向的信号集中。
+
+信号阻塞与信号未决:
+	每个进程都有一个用来描述哪些信号递送到进程时将被阻塞的信号集，该信号集中的所有信号在递送到进程后都将被阻塞。下面是与信号阻塞相关的几个函数：
+
+	#include <signal.h>
+	int  sigprocmask(int  how,  const  sigset_t *set, sigset_t *oldset))；
+	int sigpending(sigset_t *set));
+	int sigsuspend(const sigset_t *mask))；
+
+	sigprocmask()函数能够根据参数how来实现对信号集的操作，操作主要有三种：
+		SIG_BLOCK 在进程当前阻塞信号集中添加set指向信号集中的信号
+		SIG_UNBLOCK 如果进程阻塞信号集中包含set指向信号集中的信号，则解除对该信号的阻塞
+		SIG_SETMASK 更新进程阻塞信号集为set指向的信号集
+
+	sigpending(sigset_t *set))获得当前已递送到进程，却被阻塞的所有信号，在set指向的信号集中返回结果。
+	sigsuspend(const sigset_t *mask))用于在接收到某个信号之前, 临时用mask替换进程的信号掩码, 并暂停进程执行，直到收到信号为止。
+		sigsuspend 返回后将恢复调用之前的信号掩码。信号处理函数完成后，进程将继续执行。该系统调用始终返回-1，并将errno设置为EINTR。
+
+
+
+
+			
+
+
+ 
+

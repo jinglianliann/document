@@ -1,0 +1,507 @@
+core dump 设置
+ ulimit -c
+ ulimit -c unlimited
+ cat /proc/sys/kernel/core_pattern  
+ 	仅仅被设为 “core”，表示会在当前目录下生成一个文件名为 "core" 的 核心转储文件。
+ 	目前这样就行了，但是我要演示如何把它设置为全局位置。
+ 	
+编译调试文件
+	gcc 编译时可以添加参数 -g -g3 -gdwarf-2 //估计是不同版本的草案
+	-g 参数应该是必须的
+	
+	-fvisibility=hidden -Wl -Bsymbolic 这些参数主要是用来解决命名冲突，会导致文件符号表不显示。建议使用命名空间解决这类问题。
+		宏命名空间来解决这种问题
+			When compiling the library, define macro with namespace name to define it to something different. For example if the namespace is LibNS, use -DLibNS=LibNSv1 for one case and -DLibNS=LibNSv2 for the other.
+			When using libraries in the code, define macro according your current situation;
+					-DLibNS=LibNSv2  //编译参数
+						#define LibNS LibNSv1  //头文件的引用方式
+						#include "my_lib.h"
+						#undef LibNS
+
+gdb 运行可执行文件
+	gdb program           ///最常用的用gdb启动程序，开始调试的方式
+	gdb program core   ///用gdb查看core dump文件，跟踪程序core的原因
+	gdb program pid     ///用gdb调试已经开始运行的程序，指定pid即可
+	
+gdb 命令参数
+	在启动的时候设置参数
+  	gdb --args program paralist  // paralist 是参数列表
+  在运行时添加参数
+  	run paralist //paralist 是参数列表
+  在启动后run 之前设置参数
+  	set args  paralist //paralist 是参数列表
+  	run
+  查看运行参数
+  	show args
+
+gdb 动态库
+	设置动态库路径
+		set solib-absolute-prefix、 
+		set solib-search-path (.) //打开gdb后可以通过设置这两个变量添加动态库加载路径
+			set solib-search-path  设置动态库的搜索路径，该命令可设置多个搜索路径(相对路径)，路径之间使用“:”隔开。
+			set solib-absolute-prefix  设置库的绝对路径前缀，只对绝对路径有效；而solib-search-path设置库的搜索路径，对绝对路径和相对路径均起作用。 只能设置一个路径
+			
+			$LD_LIBRARY_PATH //通常设置这个环境变量就可以，推荐使用这种方式
+				export LD_LIBRARY_PATH=/home/build/lib
+				export LD_LIBRARY_PATH=/home/externals/boost/lib:$LD_LIBRARY_PATH
+				export LD_LIBRARY_PATH=/home/externals/stacktrace/lib:$LD_LIBRARY_PATH
+			source ~/.bashrc  
+			
+			sudo /sbin/ldconfig   
+			
+		  info sharedlibrary 查看动态库是否正确加载，和可调式情况	//这个命令非常实用
+			  0x00007ffff233cc30  0x00007ffff23f6928  Yes (*)     /home/externals/icu/lib/libicuuc.so.55
+				0x00007ffff048f2e0  0x00007ffff05c17a8  Yes (*)     /home/externals/icu/lib/libicui18n.so.55
+				0x0000003210802540  0x0000003210806758  Yes (*)     /usr/nhnkrb5/lib/libkrb5support.so.0
+				0x0000003f00a03930  0x0000003f00a12a98  Yes (*)     /lib64/libresolv.so.2
+				0x0000003f03200a90  0x0000003f032011c8  Yes (*)     /lib64/libfreebl3.so
+				0x0000003435005950  0x0000003435015e38  Yes (*)     /lib64/libselinux.so.1
+				0x00007ffff017c1f0  0x00007ffff01846e8  Yes (*)     /lib64/libnss_files.so.2
+				(*): Shared library is missing debugging information.
+
+	  
+	  set breakpoint pending on  当前不能处理的断点，预留给动态库处理。
+	  
+	产生 core dump 文件
+		Core  /home/evan/gdbso/mips/Coredump //参数是core dump 文件生成路径
+			core dump 如果要和可执行文件一起调试需要与对应的可执行文件匹配
+			core dump 文件也可以单独调试
+		
+		也可以使用 info sharedlibrary 查看core 文件的动态库加载情况。
+	
+在GDB调试程序的时候执行shell命令：
+	shell command args（也可以先执行shell命令，GDB会退出到当前shell, 执行完command后，回到GDB）
+	make make-args（等同于shell make make-args）
+	
+多进程/ 多线程
+		默认设置下，在调试多进程程序时GDB只会调试主进程。但是GDB（>V7.0）支持多进程的分别以及同时调试，换句话说，GDB可以同时调试多个程序。
+		
+		follow-fork-mode & detach-on-fork
+			只需要设置follow-fork-mode(默认值：parent)和detach-on-fork（默认值：on）即可。
+			说明：
+				follow-fork-mode 			detach-on-fork 
+					parent                   on               只调试主进程（GDB默认）
+					child                    on               只调试子进程
+					parent                   off              同时调试两个进程，gdb跟主进程，子进程block在fork位置
+					child                    off              同时调试两个进程，gdb跟子进程，主进程block在fork位置
+				
+			查看系统默认的 follow-fork-mode 和 detach-on-fork：
+				show follow-fork-mode
+				show detach-on-fork
+
+			设置follow-fork-mode 和 detach-on-fork：
+				set follow-fork-mode [parent|child]   
+				set detach-on-fork [on|off]
+				
+		用l/list命令查看源代码（按enter翻页），分别在子进程和父进程相应位置(fork() 函数值返回的位置。)下断点：	
+		
+		查询正在调试的进程
+			info inferiors:
+			(gdb) info inferiors
+			  Num  Description       Executable        
+			* 2    process 86456     /home/build/crbon 
+			  1    <null>            /home/build/crbon
+			  
+		切换调试的进程：
+			inferior <infer number>
+			
+		其他
+			(1)add-inferior [-copies n] [-exec executable]
+					添加新的调试进程,可以用file executable来分配给inferior可执行文件。增加n个inferior并执行程序为executable。
+					如果不指定n只增加一个inferior。如果不指定executable，则执行程序留空，增加后可使用file命令重新指定执行程序。这时候创建的inferior其关联的进程并没启动。
+
+			(2)remove-inferiors infno
+					删除一个infno号的inferior。如果inferior正在运行，则不能删除，所以删除前需要先kill或者detach这个inferior。
+
+			(3)clone-inferior [-copies n] [infno]
+					复制n个编号是infno的inferior。如果不指定n的话，就只复制一个inferior。如果不指定infno，则就复制正在调试的inferior。
+
+			(4)detach inferior
+					detach掉编号是infno的inferior。注意这个inferior还存在，可以再次用run命令执行它。
+
+			(5)kill inferior infno:
+					kill掉infno号inferior。注意这个inferior仍然存在，可以再次用run等命令执行它。
+
+			(6)set schedule-multiple on|off
+					设为off:只有当前inferior会执行。 
+					设为on：全部是执行状态的inferior都会执行。 
+					这个选项类似于多线程调试里的set .
+
+			(7)scheduler-locking
+					注意:如果scheduler-locking是指为on，即使schedule-multiple设置为on，也只有当前进程的当前线程会执行。 
+					show schedule-multiple： 查看schedule-multiple的状态。
+
+			(8)set follow-exec-mode new|same
+					设置same:当发生exec的时候，在执行exec的inferior上控制子进程。 
+					设置为new:新建一个inferior给执行起来的子进程。而父进程的inferior仍然保留，当前保留的inferior的程序状态是没有执行。
+					show follow-exec-mode
+						查看follow-exec-mode设置的模式。
+
+			(9)set print inferior-events on|off
+					用来打开和关闭inferior状态的提示信息。
+					show print inferior-events
+					查看print inferior-events设置的状态。
+					
+			(10)maint info program-spaces
+					用来显示当前GDB一共管理了多少地址空间。	
+					
+线程
+	在多线程编程时，当我们需要调试时，有时需要控制某些线程停在断点，有些线程继续执行。
+	有时需要控制线程的运行顺序。有时需要中断某个线程，切换到其他线程。这些都可以通过gdb实现。 
+	GDB默认支持调试多线程，跟主线程，子线程block在create thread。
+	
+	线程常用命令
+	
+	info threads：
+		显示可以调试的所有线程。gdb会为每个线程分配一个ID（和tid不同），编号一般从1开始。后面的ID是指这个ID。
+		(gdb) info threads
+				  5 Thread 0x7fffeed42700 (LWP 147708)  0x0000003efe6e91c3 in epoll_wait () from /lib64/libc.so.6
+				  4 Thread 0x7fffef743700 (LWP 147707)  0x0000003efea0b68c in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+				  3 Thread 0x7ffff0144700 (LWP 147706)  0x0000003efe6df383 in poll () from /lib64/libc.so.6
+				* 2 Thread 0x7ffff78db720 (LWP 147705)  zookeeper::ZooKeeper::connect (this=0x8b18a0) at zookeeper/ZooKeeper.cpp:29
+		(*) 表示现在锁定的线程。
+	
+	线程中的断点：
+		不同的线程通常执行的代码块也不一样，通常断点打在目标代码块上，根据要调试的代码块切换线程，可以结合enable/disable breakpoint 使用。
+	
+	thread ID：
+		切换当前调试的线程为指定ID的线程。 
+		
+	其他 
+		break FileName.cpp:LinuNum thread all: 
+			所有线程都在文件FileName.cpp的第LineNum行有断点。
+
+		thread apply ID1 ID2 IDN command: 
+			让线程编号是ID1，ID2…等等的线程都执行command命令。
+
+		thread apply all command：所有线程都执行command命令。
+
+		set scheduler-locking off|on|step： 
+			在调式某一个线程时，其他线程是否执行。在使用step或continue命令调试当前被调试线程的时候，其他线程也是同时执行的，
+			如果我们只想要被调试的线程执行，而其他线程停止等待，那就要锁定要调试的线程，只让他运行。
+
+			off:不锁定任何线程，默认值。 
+			on:锁定其他线程，只有当前线程执行。
+			step:在step（单步）时，只有被调试线程运行。
+
+		set non-stop on/off: 
+			当调式一个线程时，其他线程是否运行。
+
+		set pagination on/off: 
+			在使用backtrace时，在分页时是否停止。
+
+		set target-async on/ff: 
+			同步和异步。同步，gdb在输出提示符之前等待程序报告一些线程已经终止的信息。而异步的则是直接返回。
+
+		show scheduler-locking： 
+			查看当前锁定线程的模式	
+	
+gdb 常用命令
+	命令列表：
+		list／l 行号：显示binFile源代码，接着上次的位置往下列，每次列10行。
+		list／l 函数名：列出某个函数的源代码。
+		r或run：运行程序。
+		s或step：进入函数调用
+		breaktrace（bt)：查看各级函数调用及参数
+		info（i) locals：查看当前栈帧局部变量的值
+		info break ：查看断点信息。
+		finish：执行到当前函数返回，然后挺下来等待命令
+		print(p)：打印表达式的值，通过表达式可以修改变量的值或者调用函数
+		set var：修改变量的值
+		quit：退出gdb
+		break(b) 行号：在某一行设置断点
+		break 函数名：在某个函数开头设置断点
+		continue(或c)：从当前位置开始连续而非单步执行程序
+		run(或r)：从开始连续而非单步执行程序
+		delete breakpoints：删除所有断点
+		delete breakpoints n：删除序号为n的断点
+		disable breakpoints：禁用断点
+		enable breakpoints：启用断点
+		info(或i) breakpoints：参看当前设置了哪些断点
+		display 变量名：跟踪查看一个变量，每次停下来都显示它的值
+		undisplay：取消对先前设置的那些变量的跟踪
+		until X行号：跳至X行
+		p 变量：打印变量值
+		n 或 next：单条执行
+		TAB TAB : 按两次table 进行参数/命令联想(或者叫自动补全) ， 会列出可能要键入的参数或者命令
+  详述： 
+		set 
+			set var：修改变量的值
+			
+		list
+			list／l 行号：显示binFile源代码，接着上次的位置往下列，每次列10行。
+	    list／l 函数名：列出某个函数的源代码。
+	    
+		breakpoints
+			eg.
+				(gdb) break ZooKeeper.cpp:ZooKeeper::connect()
+				(gdb) break ZooKeeper.cpp:36
+				(gdb) break ZooKeeper.cpp:ZooKeeper::getChil
+				(gdb) break ZooKeeper.cpp:ZooKeeper::watcher
+				(gdb) break Cluster.cpp:Manager::Clusters
+				(gdb) break Cluster.cpp:Manager::Alives
+				
+				(gdb) info break
+					Num     Type           Disp Enb Address            What
+					1       breakpoint     keep y   0x00007ffff69c4f10 in zookeeper::ZooKeeper::connect() at zookeeper/ZooKeeper.cpp:29
+					2       breakpoint     keep y   0x00007ffff69c4f35 in zookeeper::ZooKeeper::connect() at zookeeper/ZooKeeper.cpp:36
+					3       breakpoint     keep y   0x00007ffff69c5101 in zookeeper::ZooKeeper::getChi(std::string const&, bool) at zookeeper/ZooKeeper.cpp:72
+			设置断点		
+				break function: 在函数funtion入口处设置breakpoint
+				break +offset: 在程序当前停止的行向前offset行处设置breakpoint
+				break –offset: 在程序当前停止的行向衙offset行处设置breakpoint
+				break linenum: 在当前源文件的第linenum行处设置breakpoint
+				break filename:linenum: 在名为filename的源文件的第linenum行处设置breakpoint
+				break filename:function: 在名为filename的源文件中的function函数入口处设置breakpoint
+				break *address: 在程序的地址address处设置breakpoint
+				break … if cond: …代表上面讲到的任意一个可能的参数，在某处设置一个breakpoint, 但且仅但cond(cond 可以是一个表达式，或者是一个变量的值)为true时，程序停下来
+				tbreak args: 设置一个只停止一次的breakpoints, args与break命令的一样。这样的breakpoint当第一次停下来后，就会被自己删除
+				rbreak regex: 在所有符合正则表达式regex的函数处设置breakpoint
+
+			查看断点
+				info breakpoints [n]：
+					查看第n个breakpoints的相关信息，如果省略了n，则显示所有breakpoints的相关信息
+					
+			pending breakpoints:    //这个项目在需要加载动态库的时候非常有用
+				是指设置在程序开始调试后加载的动态库中的位置处的breakpoints
+				set breakpoint pending auto/on/off // auto:GDB缺省设置，询问用户是否要设置pending breakpoint, on: 当前不能识别的breakpoint自动成为pending breakpoint , off: GDB当前不能识别某个breakpoint时，直接报错
+				show breakpoint pending: 查看GDB关于pending breakpoint的设置的行为(auto, on, off)	
+				
+				
+			删除 breakpoints：
+				clear: 清除当前stack frame中下一条指令之后的所有breakpoints
+				clear function & clear filename:function: 清除函数function入口处的breakpoints
+				clear linenum & clear filename:linenum: 清除第linenum行处的breakpoints
+				delete [breakpoints] [range…]: 删除由range指定的范围内的breakpoints，range范围是指breakpoint的序列号的范围
+
+			禁用、启用 breakpoints:
+				disable [breakpoints] [range…]: 禁用由range指定的范围内的breakpoints
+				enable [breakpoints] [range…]: 启用由range指定的范围内的breakpoints
+				enable [breakpoints] once [range…]: 只启用一次由range指定的范围内的breakpoints，等程序停下来后，自动设为禁用
+				enable [breakpoints] delete [range…]: 启用range指定的范围内的breakpoints，等程序停下来后，这些breakpoints自动被删除
+				
+			条件breakpoints相关命令：
+				设置条件breakpoints可以通过break … if cond来设置，
+				也可以通过condition bnum expression来设置，在这里首先要通过（1）中介绍的命令设置好breakpoints，然后用condition命令来指定某breakpoint的条件，该breakpoint由bnum指定，条件由expression指定
+				condition bnum: 取消第bnum个breakpoint的条件
+				ignore bnum count: 第bnum个breakpoint跳过count次后开始生效
+				
+			指定程序在某个breakpoint处停下来后执行一串命令：
+				格式：commands [bnum]  … command-list …   end  //commands 和 end 是这个命令的关键字。
+				用途：指定程序在第 bnum 个breakpoint处 停下来后，执行由command-list指定的命令串，如果没有指定bnum，则对最后一个breakpoint生效
+				取消命令列表： commands [bnum]  end
+				例子：
+					break foo if x>0
+					commands
+						silent
+						printf “x is %d\n”,x
+						continue
+					end
+				上面的例子含义：当x>0时，在foo函数处停下来，然后打印出x的值，然后继续运行程序
+						
+		执行,与单步执行
+			run [paralist] : 开始运行程序
+			step [n] & stepi [n]:  如果没有指定count, 则继续执行程序，直到到达与当前源文件不同的源文件中时停止；如果指定了count, 则重复行上面的过程count次
+											step比较常见的应用场景：在函数func被调用的某行代码处设置断点，等程序在断点处停下来后，可以用step命令进入该函数的实现中，但前提是该函数编译的时候把调试信息也编译进去了，负责step会跳过该函数。
+			next [n] & nexti [n] : 如果没有指定count, 单步执行下一行程序；如果指定了count，单步执行接下来的count行程序
+			continue : 唤醒程序，继续运行，至到遇到下一个断点，或者程序结束
+			finish : 继续执行程序，直到当前被调用的函数结束，如果该函数有返回值，把返回值也打印到控制台（
+			return [expression] : return [expression]: 中止当前函数的调用，如果指定了expression，把expresson值当做当前函数的返回值；如果没有，直接结束当前函数调用
+			
+		Watchpoint: 
+			它的作用是让程序在某个表达式的值发生变化的时候停止运行，达到‘监视’该表达式的目的
+			watchpoints和breakpoints很相像，都有enable/disabe/delete等操作，使用方法也与breakpoints的类似
+			
+			设置watchpoints:
+				watch expr: 设置写watchpoint，当应用程序写expr, 修改其值时，程序停止运行
+				rwatch expr: 设置读watchpoint，当应用程序读表达式expr时，程序停止运行
+				awatch expr: 设置读写watchpoint, 当应用程序读或者写表达式expr时，程序都会停止运行
+
+			info watchpoints:
+				查看当前调试的程序中设置的watchpoints相关信息
+				
+		Catchpoint: 
+			的作用是让程序在发生某种事件的时候停止运行，比如C++中发生异常事件，加载动态库事件
+			catchpoints和breakpoints很相像，都有enable/disabe/delete等操作，使用方法也与breakpoints的类似
+			设置catchpoints:
+				catch event: 当事件event发生的时候，程序停止运行 
+					event 的取值：
+						throw: C++抛出异常
+						catch: C++捕捉到异常
+						exec: exec被调用
+						fork: fork被调用
+						vfork: vfork被调用
+						load: 加载动态库
+						load libname: 加载名为libname的动态库
+						unload: 卸载动态库
+						unload libname: 卸载名为libname的动态库
+						syscall [args]: 调用系统调用，args可以指定系统调用号，或者系统名称
+						tcatch event: 设置只停一次的catchpoint，第一次生效后，该catchpoint被自动删除	
+						
+		信号的处理
+			打印所有的信号相关的信息，以及GDB缺省的处理方式：
+				info signals
+				info handle 
+					info signals
+					Signal        Stop      Print   Pass to program Description
+					SIGHUP        Yes       Yes     Yes             Hangup
+					SIGINT        Yes       Yes     No              Interrupt
+					SIGQUIT       Yes       Yes     Yes             Quit
+					SIGILL        Yes       Yes     Yes             Illegal instruction
+					SIGTRAP       Yes       Yes     No              Trace/breakpoint trap
+					SIGABRT       Yes       Yes     Yes             Aborted
+					SIGEMT        Yes       Yes     Yes             Emulation trap
+
+
+			handle signal action: 
+				设置GDB对具体某个信号的处理方式。signal可以为信号整数值，也可以为SIGSEGV这样的符号。
+				action的取值有：
+					stop和nostop: nostop表示当GDB收到指定的信号，不会应用停止程序的执行，只会打印出一条收到信号的消息，因此，nostop也暗含了下面的print; 而stop则表示，当GDB收到指定的信号，停止应用程序的执行。
+					print和noprint: print表示如果收到指定的信号，打印出一条信息; noprint与print表示相反的意思
+					pass和nopass：pass表示如果收到指定的信号，把该信号通知给应用程序; nopass表示与pass相反的意思
+					ignore和noignore: ignore与nopass同义，同理，noignore与pass同义	
+
+强制类型转换
+
+	C++结构类型在GDB中的强制类型转换，以下面的程序为例程进行说明：
+
+	class Base
+	{
+	public:
+	 
+	    Base(int nNum) :
+	        m_nNum(nNum)
+	    {}
+	 
+	private:
+	 
+	    int m_nNum;
+	};
+	 
+	class A : public Base
+	{
+	public:
+	 
+	    A(int nNum, char bCh) :
+	        Base(nNum),
+	        m_bCh(bCh)
+	    {}
+	 
+	private:
+	 
+	    char m_bCh;
+	};
+	 
+	namespace Test
+	{
+	    class Base
+	    {   
+	        public:
+	 
+	            Base(int nNum) :
+	                m_nNum(nNum)
+	        {}  
+	 
+	        private:
+	 
+	            int m_nNum;
+	    };  
+	 
+	    class A : public Base
+	    {   
+	        public:
+	 
+	            A(int nNum, char bCh) :
+	                Base(nNum),
+	                m_bCh(bCh)
+	        {}  
+	 
+	        private:
+	 
+	            char m_bCh;
+	    };
+	}
+	 
+	int main()
+	{
+	    Base * pObj1 = new A(10, 'A'); //第一个断点
+	    Test::Base * pObj2 = new Test::A(10, 'A'); //第二个断点
+	 
+	    delete pObj1;
+	    delete pObj2;
+	}
+	
+	现在抛出问题：用gdb启动编译好的程序，在63行处设置断点，如何查看pObj1和pObj2的m_bCh的值？
+	1. 第一次尝试，直接 p *pObj1，结果如下所示：
+		(gdb) p *pObj1
+			$1 = {
+			  m_nNum = 10
+			}
+	2. 由第一次尝试的结果，想到了强制类型转型，转换为子类A的指针类型，然后再print, 结果如下：
+		(gdb) p *(A*)pObj1 
+		$3 = {
+		    Base = {
+		    m_nNum = 10
+		  }, 
+		  members of A: 
+		  m_bCh = 65 'A'
+		}
+		这里便可以看到pObj1的m_bCh的值了。
+	3. 有了上面的经验，对于pObj2的m_bCh，就依上面2中的方法，直接上了，结果如下：
+		(gdb) p *(Test::A*)pObj2
+		A syntax error in expression, near `)pObj2'.
+		汗啊，居然提示说是语法错误，于是在网上找啊找，终于找到了解决的方法。
+	4. 下面是找到的方法，说是带namespace的强制转型要加单引号的，好诡异的语法：
+		(gdb) p *('Test::A'*)pObj2
+		$5 = {
+		   test ::Base = {
+		    m_nNum = 10
+		  }, 
+		  members of Test::A: 
+		  m_bCh = 65 'A'
+		}
+		通过上面一步步的介绍，相信读者朋友对GDB中结构类型的强制类型转换已经有了较为深入的了解，这里特别注意的就是第4步中提到的带namespace的结构类型，其它的跟C++基本中的类型的强制转换是一致的。
+		
+调用栈系列
+
+	下面是函数原型：
+		#include "execinfo .h"
+		int backtrace(void **buffer, int size);
+		char **backtrace_symbols(void *const *buffer, int size);
+		void backtrace_symbols_fd(void *const *buffer, int size, int fd);
+		
+		接下来，对上面三个函数进行介绍：
+			backtrace用来获得当前程序的调用栈，把结果存在buffer中。通常，我们用gdb调试程序，设置合适的断点，停下来之后，用backtrace(bt)命令，就可以看到当前的调用栈。但是，有的时候，用到条件断点的时候，gdb的功能就没有程序本身的强大了，这个时候，可以考虑在程序中调用backtrace函数，来获取调用栈。
+			backtrace_symbols把用backtrace获取的调用栈转换成字符串数组，以字符串数组的形式返回，使用者需要在外面释放返回的字符串数组所占用的内存
+			backtrace_symbols_fd把用backtrace获取的调用栈信息写到fd所指定的文件中
+		void * __builtin_return_address (unsigned int level)
+		这个函数用来得到当前函数，或者调用它的函数的返回地址，得到这个地址后，通过gdb反汇编，便可得到调用函数相关的信息，这也是在应用中获取调用栈的一种方法。
+	
+	内存分配、释放系列
+		#include "malloc .h"
+		size_t malloc_usable_size((void *__ptr));
+			这个函数的用法是返回调用malloc后实际分配的可用内存的大小。
+			我们都知道在C++中，operator new()可以重载各种各样的版本，可以传入调用时的相关信息来跟踪内存分配情况，
+			但是operator delete()却只有两种形式，不能随意重载，尤其是全局的operator delete()，只有一种版本，这个时候就比较痛苦了，
+			究竟释放了多少内存呢? 
+			这时候malloc_usable_size()这个函数就有用武之地了，调用它便可以获取当前释放的内存的大小。
+			这里需要注意的是，如果在delete中用了malloc_usable_size来计算释放的内存大小，那么在new中也请用它来统计开辟的内存，这样才能对应起来。
+			因为在调用malloc时，很多时候实际分配的内存会比用户申请的要大一些，所以如果两边的统计方法对应不起来的话，统计结果也会有比较大的判别。
+			
+			
+ref:
+		https://blog.csdn.net/augusdi/article/details/40003359
+		https://blog.csdn.net/snow_5288/article/details/72982594
+		https://blog.csdn.net/wu_cai_/article/details/79669842
+		https://blog.csdn.net/tl_sunshine/article/details/78936572
+		https://blog.csdn.net/_xiao/article/details/23289971			
+			
+		
+	
+	
+		
+	
+
+	
+  
+  
