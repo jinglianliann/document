@@ -1,0 +1,151 @@
+threading/threadpool 协同(并发)
+
+	解释器中的所有 C 代码在执行 Python 时必须保持这个锁。
+	Guido 最初加这个锁是因为它使用起来简单。而且每次从 CPython 中去除 GIL 的尝试会耗费单线程程序太多性能，尽管去除 GIL 会带来多线程程序性能的提升，但仍是不值得的。
+	（是不去除 GIL 最重要的原因, 一个简单的尝试是在1999年, 最终的结果是导致单线程的程序速度下降了几乎2倍.）
+	
+	GIL 对程序中线程的影响足够简单，你可以在手背上写下这个原则：“一个线程运行 Python ，而其他 N 个睡眠或者等待 I/O.”
+	
+	Python中的线程安全
+
+		如果一个线程可以随时失去 GIL，你必须使让代码线程安全。 
+		然而 Python 程序员对线程安全的看法大不同于 C 或者 Java 程序员，因为许多 Python 操作是原子的。
+
+		在列表中调用 sort()，就是原子操作的例子。
+		线程不能在排序期间被打断，其他线程从来看不到列表排序的部分，也不会在列表排序之前看到过期的数据。
+		原子操作简化了我们的生活，但也有意外。例如，+ = 似乎比 sort() 函数简单，但+ =不是原子操作。你怎么知道哪些操作是原子的，哪些不是？	
+		
+		一个线程每运行 1000 字节码，就会被解释器打断夺走 GIL 。
+		如果运气不好，这（打断）可能发生在线程加载 n 值到堆栈期间，以及把它存储回 n 期间。很容易可以看到这个过程会如何导致更新丢失：
+		通常这个代码输出 100，因为 100 个线程每个都递增 n 。但有时你会看到 99 或 98 ，如果一个线程的更新被另一个覆盖。
+		所以，尽管有 GIL，你仍然需要加锁来保护共享的可变状态.
+		
+		为了避免担心哪个操作是原子的，遵循一个简单的原则：始终围绕共享可变状态的读取和写入加锁。毕竟，在 Python 中获取一个 threading.Lock 是廉价的。
+		
+		尽管 GIL 不能免除我们加锁的需要，但它确实意味着没有加细粒度的锁的需要
+		（所谓细粒度是指程序员需要自行加、解锁来保证线程安全，典型代表是 Java , 而 CPthon 中是粗粒度的锁，即语言层面本身维护着一个全局的锁机制,用来保证线程安全）。
+		在线程自由的语言比如 Java，程序员努力在尽可能短的时间内加锁存取共享数据，减轻线程争夺，实现最大并行。
+		然而因为在 Python 中线程无法并行运行，细粒度锁没有任何优势。
+		只要没有线程保持这个锁，比如在睡眠，等待I/O, 或者一些其他失去 GIL 操作，你应该使用尽可能粗粒度的，简单的锁。其他线程无论如何无法并行运行。
+		
+	在 io密集型服务中， thread 可以带来很高的性能提升。 在一个时间点只有 1 个线程可以执行。
+	
+	协同式多任务处理, 抢占式多任务处理
+		
+	GIL 锁的是什么东西呢？应该是共享资源（解释器级别的数据）。
+		
+multiprocessing/multiprocessing.pool 并行
+	
+	多个进程，这种情况比线程更复杂，需要更多的内存，但它可以更好利用多个 CPU。 使用多进程的时候要考虑到，进程间的数据不是共享的。
+	每个进程有一个单独的GIL。可以把任务分派给多个进程，实现多核并发执行任务。
+	
+	还有一点关于GIL锁的说明，在python多进程中，同样需要全局解释器锁，因为每个子进程都有一把GIL，
+	那么当它们向stdout输出时，可以同时争抢stdout资源，导致在每个子进程输出时会把不同子进程的输出字符混合在一起，
+	无法阅读，影响代码的标志位判断，所以上例子中使用了Lock同步，在一个子进程输出完成之后再允许另一个子进程得到stdout的权限，这样避免了多个任务同时向终端输出。
+	
+	对IPC的处理
+		multiprocessing包与threading模块的另一个差异特性体现在IPC上，python的multiprocessing包自带了对Pipe和Queue的管理，效率上更高，
+		而threading模块需要与Queue模块或os.popen()、subprocess.Popen()等配合使用。
+    根据Unix环境高级编程的第15章进程间通信的描述，经典的IPC包括管道、FIFO、消息队列、信号量、以及共享存储。
+    不过应用最多的还是管道。书中指出我们应该把管道看成是半双工的，并且只能在具有公共祖先的两个进程之间使用。
+	
+		关于Pipe()
+			Pipe可以是单向(half-duplex),也可以是双向的(duplex)，默认为双向的。
+			我们可以通过multiprocessing.Pipe(duplex=False)创建单向的管道。
+			该方法返回一个元祖，包含两个文件描述符，
+			如果为单向的，则为(read-only connection，write-only connection)；
+			如果为双向的，则为(read-write Connection, read-write Connection)。
+			一个进程从Pipe一端输入对象(fd[1])，然后被Pipe另一端的进程接收(fd[0])，两个进程要有同一个父进程或者其中一个是父进程。
+			单向管道只允许管道一端的进程输入，而双向管道则允许从两端输入。这里的双向管道类似于书中提到的“协同进程”的概念。
+				#!/usr/bin/env python
+				import multiprocessing as mul
+
+				def proc1(pipe):
+				#    pipe.send('hello')
+				    print 'proc1 rec:',pipe.recv()
+
+				def proc2(pipe):
+				#    print 'proc2 rec:',pipe.recv()
+				    pipe.send('hello too')
+
+				pipe = mul.Pipe(duplex=False)
+				#pipe = mul.Pipe()
+
+				p1 = mul.Process(target=proc1,args=(pipe[0],))       # 读管道
+				p2 = mul.Process(target=proc2,args=(pipe[1],))       # 写管道
+				# 由于管道是单向的，对象pipe[0]只有读的权限(recv)，而pipe[1]只有写的权限(send)。
+				#print pipe
+				p1.start()
+				p2.start()
+				p1.join()
+				p2.join()
+			
+		关于Queue()
+			Queue与Pipe相类似，都是先进先出的结构，但Queue允许多个进程放入，多个进程从队列取出对象。这里可以与Queue模块相类比学习。
+			Queue方法其实是Unix环境高级编程IPC中FIFO命名管道的实现方法。FIFO可用于有以下两种情况：
+				---shell命令使用FIFO将数据从一条管道传送到另一条时，无需创建中间临时文件。
+				---客户进程-服务器进程应用程序中，FIFO用作汇聚点，在客户进程和服务器进程二者之间传递数据。
+					#!/usr/bin/env python
+					# -*- coding:utf-8 -*-
+					import multiprocessing
+					import time
+					import os
+
+					# 客户进程，向众所周知的FIFO服务器进程发送请求
+					def client_proc(queue,msg):
+					    request = 'I am client ' + str(msg) + '    pid: '+ str(os.getpid()) + '   time:' + str(time.time())        # 注意信息的格式，都统一为字符串类型
+					    queue.put(request)
+
+					def server_proc(queue,lock):
+					    msg = queue.get()
+					    lock.acquire()
+					    print msg + '--------------->I am server ' + 'pid: ' + str(os.getpid())
+					    lock.release()
+
+					plist_cli = []
+					plist_ser = []
+					lock = multiprocessing.Lock()
+					queue = multiprocessing.Queue()  # 参数为空，默认为队列可无限长
+
+					for i in range(10):
+					    p1 = multiprocessing.Process(target=client_proc,args=(queue,i))
+					    p2 = multiprocessing.Process(target=server_proc,args=(queue,lock))
+					    p1.start()
+					    p2.start()
+					    plist_cli.append(p1)
+					    plist_ser.append(p2)
+
+					for proc in plist_cli:
+					    proc.join()
+					    
+					for proc in plist_ser:
+					    proc.join()
+					    
+					queue.close()
+					输出如下：
+						I am client 2    pid: 9867   time:1482489226.77--------------->I am server pid: 9879
+						I am client 0    pid: 9865   time:1482489226.77--------------->I am server pid: 9881
+						........
+						I am client 9    pid: 9878   time:1482489226.78--------------->I am server pid: 9893
+						I am client 8    pid: 9875   time:1482489226.78--------------->I am server pid: 9894
+				从输出可以看出，10个客户端进程把生产信息放入队列，10个服务端进程从队列取出信息并且打印，从打印时间和msg的子进程编号来看，
+					10个服务端进程争夺stdout，通过Lock使它们有序输出，不至于输出信息混乱，msg编号没有从0排至9正是因为它们被分配给了不同的cpu资源，
+					不同cpu资源在处理速度上不会完全一样，所以争夺stdout的能力也不同。
+					
+		共享内存和Manager管理
+			由于共享内存涉及同步的问题，会降低程序的效率而不推荐使用。
+		
+		进程池
+			multiprocessing.Pool可以提供指定数量的进程供用户调用，当有新的请求提交到pool中时，
+			如果进程池还没有满，那么就会创建一个新的进程用来执行该请求；如果池中的进程数已经达到最大值，
+			那么该请求将会阻塞等待，直到池中有进程结束，才会创建新的进程来处理该请求。
+			
+			最后，调用close()之后，进程池不再创建新的进程；
+      调用join()之后，wait进程池中的全部进程。必须对Pool先调用close()方法才能join。  
+ref: 
+	https://www.cnblogs.com/webber1992/p/6217327.html	 //多进程详解
+	https://www.cnblogs.com/aademeng/articles/7241485.html
+	http://python.jobbole.com/87272/  
+	http://python.jobbole.com/87743/ //多线程介绍
+	
+	
