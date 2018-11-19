@@ -1,0 +1,106 @@
+1. 硬件负载均衡设备
+
+2. DNS
+	域名 ---->A   priority 1
+			 ---->A   priority 1
+	有点： 使用简单，容易实现，支持基于地域的域名解析，可以解析成举例用户最近的服务器地址提高性能。
+	缺点： DNS 缓存刷新需要一定时间，配置更新后再短时间内可能不可用。
+	       DNS 解析服务器通常由ISP（网络服务商管理）， 缺乏灵活性，和扩展性。
+	       维护性差，支持的算法少，不能区分服务器的差异。
+L7
+3. HTTP 重定向
+	client --> 重定向服务器--> 应用服务器。
+	优点：比较简单
+	缺点：浏览器需要零次请求服务器才能完成一次访问，性能较差。
+	        http重定向服务器自身的处理能力可能成为瓶颈。
+	        使用http302响应重定向，有可能使搜索引擎判断为SEO作弊，降低搜索排名。
+	        
+4. 反向代理
+	nginx 的 upstream 功能实现，工作在第七层网络协议。
+	支持负载均衡算法：Round-robin（轮循）、Weight-round-robin（带权轮循）、Ip-hash（Ip哈希）
+	优点：部署简单，处于http协议层面。
+  缺点：使用了反向代理服务器后，web 服务器地址不能直接暴露在外，因此web服务器不需要使用外部IP地址，而反向代理服务作为沟通桥梁就需要配置双网卡、外部内部两套IP地址。
+  	所有数据都要经过反向代理服务器返回，对代理服务器的网卡带宽有要求。Ngnix：
+		1、工作在网络的7层之上，可以针对http应用做一些分流的策略，比如针对域名、目录结构；
+		2、Nginx对网络的依赖比较小，理论上能ping通就就能进行负载功能；
+		3、Nginx安装和配置比较简单，测试起来比较方便；
+		4、也可以承担高的负载压力且稳定，一般能支撑超过1万次的并发；
+		5、对后端服务器的健康检查，只支持通过端口来检测，不支持通过url来检测。
+		6、Nginx对请求的异步处理可以帮助节点服务器减轻负载；
+		7、Nginx仅能支持http、https和Email协议，这样就在适用范围较小。
+		8、不支持Session的直接保持，但能通过ip_hash来解决。、对Big request header的支持不是很好，
+		9、支持负载均衡算法：Round-robin（轮循）、Weight-round-robin（带权轮循）、Ip-hash（Ip哈希）
+		10、Nginx还能做Web服务器即Cache功能。
+5.  IP负载均衡
+	LVS：
+		专有名词：DS，RS， CIP, DIP, RIP, VIP, INPUT links,OUTPUT, IPVS, PREROUTING, FORWARD, POSTROUTING, 客户端， 调度服务器，真实服务器。
+	VS架构从逻辑上可分为调度层、Server集群层、共享存储
+	NAT  : 通过修改源ip地址，和目标ip地址，将请求转发到real server，并用同样的方式将数据通过啊DS（drictor server）， 返回到客户端。
+				 客户端通过DS的vip访问DS, DS将目标IP改为real ip,此时 源ip是cip，目标ip是rip，将请求转发到RS， RS处理后返回数据源ip是rip，目标ip是cip，进过DS，将源ip改为vip，返回给客户端。
+				 
+				NAT模式特点：
+				本质是多目标IP的DNAT，通过将请求报文中的目标地址和目标端口修改为挑出的某个RS的RIP和PORT实现转发，是通过修改ip报文实现的。
+				1，RIP和DIP应在同一个IP网络，且应使用私网地址；RS的网关要指向DIP
+				2，请求报文和响应报文都必须经由Director转发，Director易于成为系统瓶颈
+				3， 支持端口映射，可修改请求报文的目标PORT
+				4， LVS必须是Linux系统，RS可以是任意OS系统
+	DR(数据链路层)  ：
+						client是通过VIP访问MAC, 修改ip报文的Mac地址字段，client/getway-VIP-> DR -VIP+MAC（DS修改目标地址的mac地址为RS mac）->REAL  ，
+																																		client/getway<-VIP--REAL(不能将网关指向DIP)				
+				特点： 
+				1）集群节点跟Director必须在同一物理网络中 
+				2）RIP可以使用公网地址，使用便捷的远程控制服务器 
+				3）Direcotr只负责处理入站请求，响应报文由real server直接发往客户端 
+				4）real server不能将网关指向DIP 
+				5）Director不支持端口映射 
+				6）real server支持应用在大多数OS 
+				7）DR比NAT能处理更多的real server
+	
+	TUN ：客户端将请求报文发往前端的负载均衡器，请求报文源地址是CIP，目标地址为VIP 
+			  负载均衡器受到报文后，发现请求的是在IPVS规则中存在的地址和对应的端口，那么它将在客户端的请求报文的首部再封装一层IP报文，源地址为DIP，目标地址为RIP，并将此包发送给RS。 
+			  RS收到请求报文后，会首先拆开第一层封装，然后发现里面还有一层IP首部的目标地址是自己lo接口上的VIP，所以会再次处理请求报文，并将响应报文通过lo接口送往eth0网卡直接发送给客户端。 
+				注意：需要设置lo接口上的VIP不能出现在公网上。
+				特点：
+				1）各集群节点可以跨越不同的网络 
+				2）RIP，DIP，VIP必须是公网地址 
+				3）DIrector只负责处理入站请求，响应报文由real server直接发往客户端 
+				4）real server网关不能指向Director 
+				5）real server仅能搭建在支持隧道功能的主机上 
+				6）不支持端口映射
+  调度算法：
+  		rr：round robin，轮叫，轮询 
+  		wrr：weight round robin，加权轮询
+  		dh：destination hashing，目标地址hash 
+  		sh：source hashing，源地址hash，实现会话绑定session 
+  		lc：leash-connection 最少连接 
+  		wlc：加权最少连接 
+  		sed：最少期望延迟 
+  		nq：never queue，永不排队
+  		LBLC：基于局部性的最少连接 
+  		LBLCR：基于局部性的带复制功能的最少连接 
+  		
+6. HAProxy的特点是：
+ 
+ 			注：Niginx与Haproxy比较：Niginx支持七层、用户量最大，稳定性比较可靠。Haproxy支持四层和七层，支持更多的负载均衡算法，支持session保存等。
+ 				具体选型看使用场景，目前来说Haproxy由于弥补了一些Niginx的缺点用户量也不断在提升。
+  
+7. 混合模型：
+		client-->DNS -（网址）->反向代理(nginx)-->应用层(NAT/STUN/DR)-->cluaster.
+		client-->DNS -（ip）->全局负载均衡(NAT/STUN)-->应用层（DR）-->cluster.
+	
+
+
+负载均衡服务器的集群与可用性(单点故障问题)
+		lvs/nginx/haproxy + keepalived
+	
+
+ref:
+	https://www.cnblogs.com/itfly8/p/5043435.html
+	https://www.cnblogs.com/liwei0526vip/p/6370103.html
+	https://blog.csdn.net/mengdonghui123456/article/details/53981976
+	http://www.cnblogs.com/anay/p/9260306.html
+	https://blog.csdn.net/qq_36462472/article/details/79335923
+	https://blog.csdn.net/mortredcn/article/details/62416811
+	https://www.cnblogs.com/ahang/p/5799065.html //主流服务器对比
+
+	
