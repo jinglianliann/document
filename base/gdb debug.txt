@@ -63,7 +63,7 @@ gdb 动态库
 	  set breakpoint pending on  当前不能处理的断点，预留给动态库处理。
 	  
 	产生 core dump 文件
-		Core  /home/evan/gdbso/mips/Coredump //参数是core dump 文件生成路径
+		core  /home/evan/gdbso/mips/Coredump //参数是core dump 文件生成路径
 			core dump 如果要和可执行文件一起调试需要与对应的可执行文件匹配
 			core dump 文件也可以单独调试
 		

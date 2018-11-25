@@ -1,0 +1,24 @@
+事务：
+	原子性
+	一致性
+	持久性
+	隔离性
+		读问题
+			脏读
+			不可重复读
+			幻读
+		隔离级
+			读未提交：最低级别，任何情况都无法保证。
+			读已提交：可避免脏读的发生。
+			可重复读：可避免脏读、不可重复读的发生。
+			串行化：可避免脏读、不可重复读、幻读的发生。
+
+
+
+ref：
+	https://www.cnblogs.com/fjdingsd/p/5273008.html //索引
+	https://www.cnblogs.com/bypp/p/7755307.html   //事务
+	https://blog.csdn.net/duxiangwushirenfei/article/details/79140497 //事务架构
+	https://www.cnblogs.com/zcbing/p/6397507.html //架构
+	https://www.cnblogs.com/yuxiuyan/p/6511837.html //存储引擎
+	https://www.cnblogs.com/zbseoag/archive/2013/03/19/2970004.html //数据类型

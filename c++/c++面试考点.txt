@@ -65,6 +65,29 @@
 	Test *s;//sizeof(s)=4,s为一个指针。
 	Class test1{ };//sizeof(test1)=1;
 	Class test2{ virtual void print(){}};//sizeof(test2)=4;	
+	32位编译器：
+		char ：1个字节
+		char*（即指针变量）: 4个字节（32位的寻址空间是2^32, 即32个bit，也就是4个字节。同理64位编译器）
+		short int : 2个字节
+		int：4个字节
+		unsigned int : 4个字节
+		float:4个字节
+		double:8个字节
+		long:4个字节
+		long long:8个字节
+		unsigned long:4个字节
+
+	64位编译器：
+		char ：1个字节
+		char*(即指针变量): 8个字节
+		short int : 2个字节
+		int：4个字节
+		unsigned int : 4个字节
+		float:4个字节
+		double:8个字节
+		long:8个字节
+		long long:8个字节
+		unsigned long:8个字节
 
 14.运算符new分配堆内存，如果成功，则返回指向该内存的空间，如果失败，则返回NULL。所以每次使用运算符new动态分配内存时，都应测试new的返回指针值，以防分配失败。
 	注意反复new和free堆里面的内存空间，会产生内存碎片影响系统性能，这种情况应该考虑内存池。
@@ -125,7 +148,6 @@
 	iterator ? _First, ? _Last, ? _End;?
 	每个指针是4个字节，因此16字节。20字节的是不是添加了什么指针呢？
 
-
 	deque和vector一样,采用线性表，与vector唯一不同的是，
 	deque采用的分块的线性存储结构，每块大小一般为512字节，称为一个deque块，
 	所有的deque块使用一个Map块进行管理，每个map数据项记录各个deque块的首地址，这样以来，
@@ -137,7 +159,17 @@
     list与vector中的erase用法相同，它们的 erase 函数会返回指向下一个元素的迭代器，因此在遍历时，只需要 it = c.erase(it); 即可。
   map与set
     map与set中的erase用法相同，它们的 erase 函数返回值是 void，调用 erase 之后，当前迭代器会失效，无法再用于获取下一个迭代器。因此需要 erase 之前就获取指向下一个元素的迭代器。
-    
+
+  函数调用规则
+	__cdecl调用规则就是C调用规则。按从右至左的顺序压参数入栈，由调用者把参数弹出栈。
+		切记：对于传送参数的内存栈是由调用者来维护的。返回值在EAX中因此，对于象printf这样变参数的函数必须用这种规则。
+		编译器在编译的时候对这种调用规则的函数生成修饰名的饿时候，仅在输出函数名前加上一个下划线前缀，格式为_functionname。
+	__stdcall也是按从右至左的顺序压参数入栈，但是它是由被调用者把参数弹出栈。
+		_stdcall是Pascal程序的缺省调用方式，通常用于Win32 Api中，切记：函数自己在退出时清空堆栈，返回值在EAX中。　　
+		__stdcall调用约定在输出函数名前加上一个下划线前缀，后面加上一个“@”符号和其参数的字节数，格式为_functionname@number。
+	__fastcall调用的主要特点就是快，因为它是通过寄存器来传送参数的
+		（实际上，它用ECX和EDX传送前两个双字（DWORD）或更小的参数，剩下的参数仍旧自右向左压栈传送，被调用的函数在返回前清理传送参数的内存栈）
+		__fastcall调用约定在输出函数名前加上一个“@”符号，后面也是一个“@”符号和其参数的字节数，格式为@functionname@number。	
     
   static
   
@@ -447,12 +479,13 @@
 				LOG(INFO) << " NEW LVALUE(object ot) element: " << i;  
 			}
 			移动构造函数，最大的用途避免同一份内存数据的不必要的变成两份甚至多份、过程中的变量传递导致的内存复制，另外解除了栈变量对内存的引用；
-		override和final
 
+		override和final
 			作用于虚函数，更多的作用是：显式的标识是否应该多态继承或不应该
 			1、override：子类用override修饰其虚函数，表示要多态继承基类的虚函数。不可以修饰非虚函数
 			举一个rocksdb的merge运算符重载的例子：
 			2、final：基类用final修饰其虚函数，意外其子类不可以多态继承该虚函数
+
 		lambda、bind、function：
 			函数式编程是c++11重要亮点之一
 			4.1、直接lambda表达式
